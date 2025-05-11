@@ -1,25 +1,44 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  LoggerService,
+} from '@nestjs/common';
 import elasticClient from 'src/config/elasticSearch.client';
 import { BlogDto } from './dto/blog.dto';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 
 @Injectable()
 export class BlogService {
+  constructor(
+    @Inject(WINSTON_MODULE_NEST_PROVIDER)
+    private readonly logger: LoggerService,
+  ) {}
   async createBlog(data: BlogDto) {
     const { title, content } = data;
+
     if (!title || !content) {
+      this.logger.warn('Missing required fields in createBlog');
       throw new BadRequestException('fields are required');
     }
+
     try {
       const result = await elasticClient.index({
         index: 'blog',
         document: { title, content },
       });
+
+      this.logger.log(`Blog created successfully: ${result._id}`);
       return result;
     } catch (error) {
-      throw new Error(`Error creating blog: ${error}`);
+      this.logger.error(`Error creating blog`, { error });
+      throw new Error(`Error creating blog: ${error.message}`);
     }
   }
+
   async getBlogs() {
+    this.logger.log('Fetching all blogs from Elasticsearch...');
+
     try {
       const result = await elasticClient.search({
         index: 'blog',
@@ -29,15 +48,19 @@ export class BlogService {
         size: 1000,
       });
 
-      return result.hits.hits.map((hit) => ({
+      const blogs = result.hits.hits.map((hit) => ({
         id: hit._id,
         ...(hit._source as { [key: string]: any }),
       }));
+
+      this.logger.log(`Successfully fetched ${blogs.length} blogs`);
+
+      return blogs;
     } catch (error) {
-      throw new Error(`Error fetching blogs: ${error}`);
+      this.logger.error('Error fetching blogs', error.stack);
+      throw new Error(`Error fetching blogs: ${error.message}`);
     }
   }
-
   async getBlogByValue(value: string) {
     if (!value) {
       throw new BadRequestException('Search value is required');
